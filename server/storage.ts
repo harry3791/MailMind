@@ -18,7 +18,8 @@ import {
   type InsertMessage,
   calendarEvents,
   type CalendarEvent,
-  type InsertCalendarEvent
+  type InsertCalendarEvent,
+  appSettings
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, ilike, desc, sql } from "drizzle-orm";
@@ -55,6 +56,9 @@ export interface IStorage {
   addCalendarEvent(event: InsertCalendarEvent): Promise<CalendarEvent>;
   getCalendarEvents(): Promise<CalendarEvent[]>;
   getCalendarEventsByEmailId(emailId: number): Promise<CalendarEvent[]>;
+  
+  getAppSetting(key: string): Promise<string | null>;
+  setAppSetting(key: string, value: string): Promise<void>;
 }
 
 function tokenize(query: string): string[] {
@@ -270,6 +274,22 @@ export class DatabaseStorage implements IStorage {
     await db.update(emails)
       .set({ isProcessed: "true" })
       .where(eq(emails.id, id));
+  }
+
+  async getAppSetting(key: string): Promise<string | null> {
+    const [setting] = await db.select().from(appSettings).where(eq(appSettings.key, key));
+    return setting?.value ?? null;
+  }
+
+  async setAppSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getAppSetting(key);
+    if (existing !== null) {
+      await db.update(appSettings)
+        .set({ value, updatedAt: new Date() })
+        .where(eq(appSettings.key, key));
+    } else {
+      await db.insert(appSettings).values({ key, value });
+    }
   }
 }
 

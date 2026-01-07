@@ -1,19 +1,31 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   Settings as SettingsIcon,
   Database,
   Folder,
   Server,
-  HardDrive
+  HardDrive,
+  Save,
+  AlertCircle,
+  CheckCircle
 } from "lucide-react";
 
 interface StorageSettings {
   mode: string;
   dataDir: string;
+  savedMode: string;
+  savedDataDir: string;
   info: string;
+  needsRestart: boolean;
 }
 
 interface OllamaStatus {
@@ -22,6 +34,11 @@ interface OllamaStatus {
 }
 
 export default function Settings() {
+  const { toast } = useToast();
+  const [storageMode, setStorageMode] = useState<string>("");
+  const [dataDir, setDataDir] = useState<string>("");
+  const [isFormInitialized, setIsFormInitialized] = useState(false);
+
   const { data: storageSettings, isLoading: storageLoading } = useQuery<StorageSettings>({
     queryKey: ["/api/settings/storage"],
   });
@@ -29,6 +46,47 @@ export default function Settings() {
   const { data: ollamaStatus, isLoading: ollamaLoading } = useQuery<OllamaStatus>({
     queryKey: ["/api/ollama/status"],
   });
+
+  useEffect(() => {
+    if (storageSettings && !isFormInitialized) {
+      setStorageMode(storageSettings.savedMode || storageSettings.mode || "postgresql");
+      setDataDir(storageSettings.savedDataDir || storageSettings.dataDir || "");
+      setIsFormInitialized(true);
+    }
+  }, [storageSettings, isFormInitialized]);
+
+  const saveStorageMutation = useMutation({
+    mutationFn: async (data: { mode: string; dataDir: string }) => {
+      return apiRequest("POST", "/api/settings/storage", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/storage"] });
+      toast({
+        title: "설정 저장됨",
+        description: "변경 사항을 적용하려면 애플리케이션을 재시작하세요.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "저장 실패",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSave = () => {
+    if (storageMode === "local" && !dataDir.trim()) {
+      toast({
+        title: "폴더 경로 필요",
+        description: "로컬 저장소를 사용하려면 데이터 폴더 경로를 입력하세요.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    saveStorageMutation.mutate({ mode: storageMode, dataDir: dataDir });
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -54,10 +112,10 @@ export default function Settings() {
               저장소 설정
             </CardTitle>
             <CardDescription>
-              이메일 데이터가 저장되는 위치를 확인합니다
+              이메일 데이터가 저장되는 위치를 설정합니다
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             {storageLoading ? (
               <div className="space-y-2">
                 <Skeleton className="h-4 w-32" />
@@ -65,8 +123,8 @@ export default function Settings() {
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">저장소 모드</span>
+                <div className="flex items-center justify-between gap-4 p-3 bg-muted/50 rounded-md">
+                  <span className="text-sm">현재 사용 중:</span>
                   <Badge variant={storageSettings?.mode === "local" ? "default" : "secondary"}>
                     {storageSettings?.mode === "local" ? (
                       <>
@@ -81,30 +139,90 @@ export default function Settings() {
                     )}
                   </Badge>
                 </div>
-                
-                {storageSettings?.mode === "local" && storageSettings.dataDir && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">데이터 폴더</span>
-                    <span className="text-sm font-mono bg-muted px-2 py-1 rounded flex items-center gap-1">
-                      <Folder className="h-3 w-3" />
-                      {storageSettings.dataDir}
-                    </span>
+
+                {storageSettings?.needsRestart && (
+                  <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-md text-sm">
+                    <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                    <span>저장된 설정이 현재 설정과 다릅니다. 재시작이 필요합니다.</span>
                   </div>
                 )}
 
-                <div className="pt-2 text-sm text-muted-foreground border-t">
-                  {storageSettings?.info}
-                </div>
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium">저장소 모드 선택</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Button
+                        type="button"
+                        variant={storageMode === "postgresql" ? "default" : "outline"}
+                        className="h-auto p-4 justify-start"
+                        onClick={() => setStorageMode("postgresql")}
+                        data-testid="button-postgresql"
+                      >
+                        <Database className="h-5 w-5 mr-3 flex-shrink-0" />
+                        <div className="text-left">
+                          <div className="font-medium">PostgreSQL</div>
+                          <div className="text-xs opacity-70">클라우드 데이터베이스</div>
+                        </div>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={storageMode === "local" ? "default" : "outline"}
+                        className="h-auto p-4 justify-start"
+                        onClick={() => setStorageMode("local")}
+                        data-testid="button-local"
+                      >
+                        <HardDrive className="h-5 w-5 mr-3 flex-shrink-0" />
+                        <div className="text-left">
+                          <div className="font-medium">로컬 PC 폴더</div>
+                          <div className="text-xs opacity-70">SQLite 파일로 저장</div>
+                        </div>
+                      </Button>
+                    </div>
+                  </div>
 
-                <div className="bg-muted/50 rounded-md p-4 text-sm">
-                  <p className="font-medium mb-2">저장소 모드 변경하기</p>
-                  <p className="text-muted-foreground">
-                    환경 변수를 통해 저장소 모드를 변경할 수 있습니다:
-                  </p>
-                  <ul className="mt-2 space-y-1 text-xs font-mono">
-                    <li><code>STORAGE_MODE=local</code> - 로컬 SQLite 사용</li>
-                    <li><code>DATA_DIR=/path/to/folder</code> - 데이터 저장 경로</li>
-                  </ul>
+                  {storageMode === "local" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="dataDir" className="text-sm font-medium flex items-center gap-2">
+                        <Folder className="h-4 w-4" />
+                        데이터 폴더 경로
+                      </Label>
+                      <Input
+                        id="dataDir"
+                        value={dataDir}
+                        onChange={(e) => setDataDir(e.target.value)}
+                        placeholder="/home/user/email-data"
+                        className="font-mono"
+                        data-testid="input-data-dir"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        예: /home/user/email-data 또는 C:\Users\user\email-data
+                      </p>
+                    </div>
+                  )}
+
+                  <Button 
+                    onClick={handleSave} 
+                    disabled={saveStorageMutation.isPending}
+                    className="w-full"
+                    data-testid="button-save-storage"
+                  >
+                    {saveStorageMutation.isPending ? (
+                      "저장 중..."
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        설정 저장
+                      </>
+                    )}
+                  </Button>
+
+                  <div className="text-xs text-muted-foreground p-3 bg-muted/30 rounded-md">
+                    <p className="font-medium mb-1">참고사항:</p>
+                    <ul className="space-y-1 list-disc list-inside">
+                      <li>설정 변경 후 애플리케이션 재시작이 필요합니다</li>
+                      <li>환경 변수로도 설정 가능: STORAGE_MODE, DATA_DIR</li>
+                    </ul>
+                  </div>
                 </div>
               </>
             )}
@@ -129,14 +247,24 @@ export default function Settings() {
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                   <span className="text-sm text-muted-foreground">연결 상태</span>
                   <Badge variant={ollamaStatus?.connected ? "default" : "destructive"}>
-                    {ollamaStatus?.connected ? "연결됨" : "연결 안됨"}
+                    {ollamaStatus?.connected ? (
+                      <>
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        연결됨
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        연결 안됨
+                      </>
+                    )}
                   </Badge>
                 </div>
                 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                   <span className="text-sm text-muted-foreground">서버 주소</span>
                   <span className="text-sm font-mono bg-muted px-2 py-1 rounded">
                     {ollamaStatus?.baseUrl || "http://localhost:11434"}

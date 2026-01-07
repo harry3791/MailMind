@@ -493,18 +493,60 @@ export async function registerRoutes(
 
   app.get("/api/settings/storage", async (_req: Request, res: Response) => {
     try {
-      const mode = process.env.STORAGE_MODE || "postgresql";
-      const dataDir = process.env.DATA_DIR || "";
+      const savedSettings = await storage.getAppSetting("storage_config");
+      let config = { mode: "postgresql", dataDir: "" };
+      
+      if (savedSettings) {
+        try {
+          config = JSON.parse(savedSettings);
+        } catch {}
+      }
+      
+      const currentMode = process.env.STORAGE_MODE || "postgresql";
+      const currentDataDir = process.env.DATA_DIR || "";
+      
       res.json({ 
-        mode, 
-        dataDir,
-        info: mode === "local" && dataDir 
-          ? `로컬 저장소 사용 중 (${dataDir})` 
-          : "PostgreSQL 데이터베이스 사용 중"
+        mode: currentMode,
+        dataDir: currentDataDir,
+        savedMode: config.mode,
+        savedDataDir: config.dataDir,
+        info: currentMode === "local" && currentDataDir 
+          ? `로컬 저장소 사용 중 (${currentDataDir})` 
+          : "PostgreSQL 데이터베이스 사용 중",
+        needsRestart: config.mode !== currentMode || config.dataDir !== currentDataDir
       });
     } catch (error) {
       console.error("Get storage settings error:", error);
       res.status(500).json({ error: "설정을 가져오는 중 오류가 발생했습니다." });
+    }
+  });
+
+  app.post("/api/settings/storage", async (req: Request, res: Response) => {
+    try {
+      const { mode, dataDir } = req.body;
+      
+      if (!mode || (mode !== "local" && mode !== "postgresql")) {
+        res.status(400).json({ error: "유효하지 않은 저장소 모드입니다." });
+        return;
+      }
+      
+      if (mode === "local" && !dataDir) {
+        res.status(400).json({ error: "로컬 모드에는 데이터 폴더 경로가 필요합니다." });
+        return;
+      }
+
+      const config = JSON.stringify({ mode, dataDir: dataDir || "" });
+      await storage.setAppSetting("storage_config", config);
+      
+      res.json({ 
+        success: true, 
+        message: "설정이 저장되었습니다. 변경 사항을 적용하려면 애플리케이션을 재시작하세요.",
+        savedMode: mode,
+        savedDataDir: dataDir
+      });
+    } catch (error) {
+      console.error("Save storage settings error:", error);
+      res.status(500).json({ error: "설정 저장 중 오류가 발생했습니다." });
     }
   });
 

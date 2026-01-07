@@ -462,4 +462,18 @@ export class LocalSQLiteStorage implements IStorage {
       createdAt: new Date(row.created_at),
     }));
   }
+
+  async getAppSetting(key: string): Promise<string | null> {
+    const row = this.db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  async setAppSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getAppSetting(key);
+    if (existing !== null) {
+      this.db.prepare("UPDATE app_settings SET value = ?, updated_at = datetime('now') WHERE key = ?").run(value, key);
+    } else {
+      this.db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)').run(key, value);
+    }
+  }
 }
